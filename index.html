@@ -436,7 +436,7 @@ input[type=file]{display:none}
             </div>
           </div>
           <button class="btn primary" id="download">JPG herunterladen</button>
-          <p class="hint" id="dlHint" style="text-align:center">Dateiname wird aus dem Namen gebildet.</p>
+          <p class="hint" id="dlHint" style="text-align:center">Dateiname: <span id="dlName">…</span></p>
         </div>
 
       </div>
@@ -542,6 +542,20 @@ const FONT = '"Source Sans 3", -apple-system, "Segoe UI", Roboto, Helvetica, Ari
 /* Export als JPEG: die Karte braucht keine Transparenz, und PNG speichert
    Fotos verlustfrei – das kostet hier gut das Vierfache an Dateigröße. */
 const EXPORT = { mime:"image/jpeg", quality:0.92, ext:"jpg" };
+
+/* Weiche Kante am oberen Rand, damit die weißen Formate im weißen Feed
+   nicht ins Nichts übergehen. Aus Gradient.svg: 56 von 550 Einheiten hoch,
+   Schwarz mit 4 % Deckkraft, auslaufend auf null. Da der Verlauf keine
+   waagerechte Struktur hat, wird er gezeichnet statt eingebettet — das ist
+   exakt dasselbe Ergebnis und über die volle Breite immer bündig. */
+const TOP_EDGE = { h: 0.1018, alpha: 0.04 };
+function drawTopEdge(c, W){
+  const g = c.createLinearGradient(0, 0, 0, TOP_EDGE.h*W);
+  g.addColorStop(0, "rgba(0,0,0," + TOP_EDGE.alpha + ")");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  c.fillStyle = g;
+  c.fillRect(0, 0, W, TOP_EDGE.h*W);
+}
 
 /* Farbe des Partnerblocks — eine Quelle für Zustand, Layout und Farbwähler */
 const PARTNER_COLOR = "#e30b5c";
@@ -866,6 +880,7 @@ function dekEdge(profile, xf){
 
 function drawTextCard(c, W, H, o){
   c.fillStyle = "#ffffff"; c.fillRect(0,0,W,H);
+  drawTopEdge(c, W);
 
   const barTop = H - Q.barH*W;
   const left = Q.margin*W;
@@ -1130,6 +1145,7 @@ function parseAgenda(text){
 
 function drawAgenda(c, W, H){
   c.fillStyle = "#ffffff"; c.fillRect(0,0,W,H);
+  drawTopEdge(c, W);
   drawAgendaRings(c, W);
 
   const barTop = H - Q.barH*W;
@@ -1282,6 +1298,8 @@ function draw(){
     $("shell").style.setProperty("--ar", String(f.w/f.h));
   }
   render(ctx, f.w, f.h);
+  const dn = $("dlName");
+  if (dn) dn.textContent = nextFilename();
   updateGlow();
   scheduleSizes();
 }
@@ -1632,12 +1650,24 @@ $("pcolor").addEventListener("input", e => {
 
 /* --------------------------- Export ---------------------------- */
 
-function slug(s){
-  const map = {"ä":"ae","ö":"oe","ü":"ue","Ä":"ae","Ö":"oe","Ü":"ue","ß":"ss"};
-  return (s || "speaker-card").replace(/[äöüÄÖÜß]/g, ch => map[ch])
+/* Dateiname: KLiB-BatteriepassKompakt-{Format}-01
+   Der Zähler läuft über alle Formate hinweg, nicht je Kategorie. Er lebt nur
+   für die Dauer der Sitzung — dauerhaft speichern würde den Hinweis zur
+   Datenverarbeitung verletzen, der ausdrücklich zusagt, nichts im
+   Browserspeicher abzulegen. */
+const NAME_PREFIX = "KLiB-BatteriepassKompakt";
+let exportCount = 0;
+
+function formatToken(label){
+  const map = {"ä":"ae","ö":"oe","ü":"ue","Ä":"Ae","Ö":"Oe","Ü":"Ue","ß":"ss"};
+  return (label || "Post").replace(/[äöüÄÖÜß]/g, ch => map[ch])
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")
-    .slice(0,60) || "speaker-card";
+    .replace(/[^A-Za-z0-9]+/g,"") || "Post";
+}
+
+function nextFilename(){
+  const nr = String(exportCount + 1).padStart(2, "0");
+  return NAME_PREFIX + "-" + formatToken(activeLayout().label) + "-" + nr + "." + EXPORT.ext;
 }
 
 /* Läuft in zwei Umgebungen:
@@ -1680,8 +1710,8 @@ $("download").addEventListener("click", async () => {
     render(off.getContext("2d"), W, H);
     const blob = await new Promise(res => off.toBlob(res, EXPORT.mime, EXPORT.quality));
     if (!blob){ toast("Bild konnte nicht erzeugt werden."); return; }
-    const filename = slug(S.name) + "-" + S.format.replace(":","x") + "." + EXPORT.ext;
-    await saveFile(blob, filename);
+    await saveFile(blob, nextFilename());
+    exportCount++;
   } catch(err){
     const code = err && err.code;
     if (code === "declined") { /* Nutzer hat abgebrochen */ }
